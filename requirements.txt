@@ -1,3 +1,5 @@
 streamlit
 yfinance
-feedparser
+pandas
+pandas_ta
+numpy
