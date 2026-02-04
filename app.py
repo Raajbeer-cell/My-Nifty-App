@@ -59,13 +59,19 @@ st.markdown("""
     /* Tags */
     .tech-tag {
         font-size: 11px;
-        padding: 2px 6px;
+        padding: 4px 8px;
         border-radius: 4px;
-        background-color: #f0f2f5;
-        color: #555;
-        border: 1px solid #ddd;
+        font-weight: 600;
         margin-right: 5px;
+        display: inline-block;
     }
+    .tag-green { background-color: #e6f9e6; color: #009933; border: 1px solid #009933; }
+    .tag-red { background-color: #ffe6e6; color: #cc0000; border: 1px solid #cc0000; }
+    .tag-blue { background-color: #e6f2ff; color: #0066cc; border: 1px solid #0066cc; }
+    
+    /* Call Card Specifics */
+    .call-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .call-val { font-size: 15px; font-weight: 600; color: #333; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,7 +79,6 @@ st.title("📈 Market Dashboard Pro")
 st.caption(f"Last Updated: Real-time Mode Active • Refresh #{count}")
 
 # --- DATA CONFIGURATION ---
-# Added USDINR for MCX Conversion logic
 ASSETS = {
     "🇮🇳 INDICES": {"NIFTY 50": "^NSEI", "BANK NIFTY": "^NSEBANK"},
     "🪙 CRYPTO": {"BITCOIN": "BTC-USD", "ETHEREUM": "ETH-USD"},
@@ -85,6 +90,135 @@ ALL_TICKERS = []
 for cat in ASSETS.values():
     ALL_TICKERS.extend(cat.values())
 
+# --- NEW EXPERT DATA (Integrated) ---
+EXPERT_DATA = {
+  "INDIAN_STOCKS": [
+    {
+      "script_name": "ADANIPORTS",
+      "trend_strength": "Very Strong (ADX: 32.5)",
+      "entry_price": 1560,
+      "stop_loss": 1490,
+      "exit_price_target_1": 1650,
+      "exit_price_target_2": 1720,
+      "holding_duration": "14-21 Days",
+      "expected_returns": "8-10%",
+      "logic": "Breakout above 52-week high with high volume; Beneficiary of India-US Trade Deal news.",
+      "sector_rank": "1"
+    },
+    {
+      "script_name": "TRENT",
+      "trend_strength": "Strong Bullish (ADX: 28.4)",
+      "entry_price": 4050,
+      "stop_loss": 3880,
+      "exit_price_target_1": 4350,
+      "exit_price_target_2": 4500,
+      "holding_duration": "30-45 Days",
+      "expected_returns": "12-15%",
+      "logic": "Consistent retail expansion and strong quarterly earnings growth; RSI holding above 60.",
+      "sector_rank": "2"
+    },
+    {
+      "script_name": "POWERGRID",
+      "trend_strength": "Momentum (ADX: 26.1)",
+      "entry_price": 415,
+      "stop_loss": 395,
+      "exit_price_target_1": 445,
+      "exit_price_target_2": 465,
+      "holding_duration": "45-60 Days",
+      "expected_returns": "10%",
+      "logic": "Defensive pick with sustained buying interest; MACD crossover on weekly charts.",
+      "sector_rank": "3"
+    },
+    {
+      "script_name": "INFOSYS",
+      "trend_strength": "Weak/Bearish (ADX: 18)",
+      "entry_price": 1820,
+      "stop_loss": 1880,
+      "exit_price_target_1": 1750,
+      "exit_price_target_2": 1680,
+      "holding_duration": "7-10 Days",
+      "expected_returns": "5-7% (Short Side)",
+      "logic": "Facing resistance at 1850; Tech sector under pressure due to global discretionary spending slowdown.",
+      "sector_rank": "Lagging"
+    }
+  ],
+  "METALS": [
+    {
+      "commodity": "GOLD (MCX)",
+      "trend": "BULLISH",
+      "current_market_price": 148676,
+      "entry_range": "148000 - 148500",
+      "stop_loss": 146500,
+      "target_1": 152000,
+      "target_2": 155000,
+      "analysis": "Safe-haven buying amid global volatility. Price sustaining above 20-day EMA."
+    },
+    {
+      "commodity": "SILVER (MCX)",
+      "trend": "HIGH MOMENTUM BULLISH",
+      "current_market_price": 254005,
+      "entry_range": "252000 - 253000",
+      "stop_loss": 248000,
+      "target_1": 265000,
+      "target_2": 275000,
+      "analysis": "Industrial demand uptick and breakout from consolidation zone. Silver outperforming Gold in percentage terms."
+    },
+    {
+      "commodity": "COPPER",
+      "trend": "NEUTRAL",
+      "current_market_price": 865,
+      "entry_range": "Wait for dip to 850",
+      "stop_loss": 835,
+      "target_1": 890,
+      "target_2": 910,
+      "analysis": "Consolidating in a narrow range. Wait for breakout above 880 for fresh longs."
+    }
+  ],
+  "SCRIPT_SPECIFIC_SIGNALS": [
+    {
+      "script": "NIFTY 50",
+      "side": "BUY/LONG",
+      "action_zone": "Above 25800",
+      "confirmation_logic": "Hourly closing above 25800 indicates continuation of the trend towards 26000. Support established at 25650.",
+      "risk_reward": "1:2.5"
+    },
+    {
+      "script_name": "BANK NIFTY",
+      "side": "WAIT/WATCH",
+      "action_zone": "Range 59800 - 60300",
+      "confirmation_logic": "Index is stuck in a consolidation box. Buy only on a clear breakout above 60350 with high volumes.",
+      "risk_reward": "1:2"
+    },
+    {
+      "script_name": "RELIANCE",
+      "side": "BUY/LONG",
+      "action_zone": "At CMP 1450-1460",
+      "confirmation_logic": "Stock has taken support at 200 DMA. RSI showing positive divergence.",
+      "risk_reward": "1:3"
+    }
+  ],
+  "GLOBAL_NEWS_IMPACT": [
+    {
+      "event": "India-US Trade Deal Announcement",
+      "impact_asset": "Nifty IT & Pharma",
+      "sentiment": "BULLISH",
+      "reason": "Reduction in tariffs to 18% improves competitiveness for export-oriented Indian sectors, boosting earnings visibility."
+    },
+    {
+      "event": "US Fed Rate Decision (Upcoming)",
+      "impact_asset": "GOLD & BANK NIFTY",
+      "sentiment": "NEUTRAL",
+      "reason": "Markets have priced in a pause. Any hawkish commentary could trigger profit booking in Gold and Banking stocks."
+    },
+    {
+      "event": "Brent Crude Stabilizing at $70",
+      "impact_asset": "ASIAN PAINTS / TYRE STOCKS",
+      "sentiment": "BULLISH",
+      "reason": "Lower crude input costs directly improve margins for paint and tyre manufacturing companies."
+    }
+  ]
+}
+
 # --- FUNCTIONS ---
 
 @st.cache_data(ttl=55) # Cache slightly less than refresh rate
@@ -94,10 +228,6 @@ def fetch_data(tickers, period, interval):
     return data
 
 def calculate_technical_score(df):
-    """
-    Calculates a score out of 10 based on standard technical indicators.
-    Returns: Score, Positive Count, Total Checks, Detail Dictionary
-    """
     if df.empty or len(df) < 50: return 0, 0, 10, {}
     
     # Calculate Indicators
@@ -114,7 +244,7 @@ def calculate_technical_score(df):
     curr = df.iloc[-1]
     close = curr['Close']
     
-    # --- SCORING LOGIC (10 Checks) ---
+    # --- SCORING LOGIC ---
     checks = {
         "Price > EMA 50": close > curr['EMA_50'],
         "Price > EMA 200": close > curr['EMA_200'],
@@ -128,10 +258,6 @@ def calculate_technical_score(df):
         "Volume Rising": curr['Volume'] > df['Volume'].rolling(5).mean().iloc[-1]
     }
     
-    # Logic: If Bearish context, we might invert score, but for "Strength" we usually count Bullish signals
-    # Or we calculate "Bull Strength" vs "Bear Strength". 
-    # Here we calculate BULLISH STRENGTH (0 to 10).
-    
     positive_signals = sum(checks.values())
     total_checks = 10
     score = (positive_signals / total_checks) * 10
@@ -140,10 +266,11 @@ def calculate_technical_score(df):
 
 # --- MAIN APP UI ---
 
-tab1, tab2 = st.tabs(["📊 DASHBOARD", "📰 INTELLIGENCE"])
+# Updated to 3 Tabs to include the new Data
+tab1, tab2, tab3 = st.tabs(["📊 DASHBOARD", "📰 INTELLIGENCE", "🎯 PRIME SETUPS"])
 
+# --- TAB 1: LIVE DASHBOARD ---
 with tab1:
-    # Top Bar Summary
     col_ctrl, col_status = st.columns([4, 1])
     with col_ctrl:
         timeframe = st.selectbox("Market View:", ["15m", "1h", "1d"], index=1)
@@ -159,14 +286,11 @@ with tab1:
     except:
         usdinr = 84.0 # Fallback
 
-    # Loop Categories
     if raw_data is not None:
         for cat_name, tickers in ASSETS.items():
-            if "FOREX" in cat_name: continue # Hide Forex row, use it for calculation only
+            if "FOREX" in cat_name: continue 
             
             st.subheader(cat_name)
-            
-            # Grid Layout
             cols = st.columns(3)
             idx = 0
             
@@ -175,40 +299,30 @@ with tab1:
                     df = raw_data[symbol].dropna()
                     if df.empty: continue
                     
-                    # Score Calculation
                     score, pos_cnt, total, details = calculate_technical_score(df)
                     
-                    # Data Points
                     close = df['Close'].iloc[-1]
                     prev_close = df['Close'].iloc[-2]
                     chg = close - prev_close
                     pct_chg = (chg / prev_close) * 100
                     
-                    # SILVER SPECIAL LOGIC (MCX Simulation)
                     display_price = close
                     price_prefix = "$"
                     is_silver = "SILVER" in name or "SI=F" in symbol
                     
                     if is_silver:
-                        # Convert Global Silver ($/oz) to Approx MCX (INR/kg)
-                        # Formula: (Price / 31.1035) * 1000 * USDINR * (Import Duty + Premium ~ 15%)
                         mcx_approx = (close / 31.1035) * 1000 * usdinr * 1.15
                         display_price = mcx_approx
                         price_prefix = "₹"
-                        name = "SILVER MIC (MCX Approx)" # Renaming for display
+                        name = "SILVER MIC (MCX Approx)"
                     elif cat_name == "🇮🇳 INDICES":
                         price_prefix = "₹"
                     
-                    # Styling Classes
                     color_cls = "price-positive" if chg > 0 else "price-negative"
                     arrow = "▲" if chg > 0 else "▼"
-                    
-                    # Bar Color based on score
                     bar_cls = "score-fill-neutral"
                     if score >= 7: bar_cls = "score-fill-bull"
                     if score <= 3: bar_cls = "score-fill-bear"
-                    
-                    # Special CSS for Silver
                     card_cls = "mc-card silver-card" if is_silver else "mc-card"
                     
                     with cols[idx % 3]:
@@ -230,28 +344,19 @@ with tab1:
                                 <div class="score-container">
                                     <div class="{bar_cls}" style="width: {score*10}%;"></div>
                                 </div>
-                                <div style="margin-top:8px; font-size:11px; color:#888;">
-                                    {pos_cnt} of {total} Indicators are Bullish
-                                </div>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        # Optional: Expandable details
-                        with st.expander("View Indicators"):
-                            st.write(f"**RSI:** {df['RSI'].iloc[-1]:.2f}")
-                            st.write(f"**Trend:** {'Bullish' if score > 5 else 'Bearish'}")
-                            
                     idx += 1
-                except Exception as e:
+                except Exception:
                     pass
             st.markdown("<br>", unsafe_allow_html=True)
 
+# --- TAB 2: NEWS INTELLIGENCE ---
 with tab2:
     st.header("🌍 Market Sentiment News")
     news_opt = st.radio("Source:", ["General", "India", "Crypto"], horizontal=True)
     
-    # (Existing News Logic kept same but cleaner UI)
     feed_url = "https://finance.yahoo.com/news/rssindex" # Default
     if news_opt == "India": feed_url = "https://www.moneycontrol.com/rss/economy.xml"
     if news_opt == "Crypto": feed_url = "https://cointelegraph.com/rss"
@@ -272,3 +377,66 @@ with tab2:
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+# --- TAB 3: PRIME SETUPS (NEW ADDITION) ---
+with tab3:
+    st.markdown("### 🏆 Expert Swing Picks & Analysis")
+    
+    # 1. Indian Stocks Grid
+    st.markdown("#### 🇮🇳 Top Stock Picks")
+    cols = st.columns(2)
+    for i, stock in enumerate(EXPERT_DATA["INDIAN_STOCKS"]):
+        is_long = "Bearish" not in stock["trend_strength"] and "Weak" not in stock["trend_strength"]
+        side_tag = "tag-green" if is_long else "tag-red"
+        side_text = "BUY/LONG" if is_long else "SELL/SHORT"
+        
+        with cols[i % 2]:
+            st.markdown(f"""
+            <div class="mc-card" style="border-top: 4px solid {'#009933' if is_long else '#cc0000'};">
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="asset-name">{stock['script_name']}</span>
+                    <span class="tech-tag {side_tag}">{side_text}</span>
+                </div>
+                <div style="font-size:13px; color:#555; margin-bottom:10px;">{stock['trend_strength']}</div>
+                
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <div><span class="call-label">ENTRY</span><br><span class="call-val">₹{stock['entry_price']}</span></div>
+                    <div><span class="call-label">STOP LOSS</span><br><span class="call-val" style="color:#cc0000">₹{stock['stop_loss']}</span></div>
+                    <div><span class="call-label">TARGET</span><br><span class="call-val" style="color:#009933">₹{stock['exit_price_target_1']}</span></div>
+                </div>
+                <hr style="margin:8px 0;">
+                <div style="font-size:13px; font-style:italic; color:#444;">"{stock['logic']}"</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # 2. Metals & Signals Row
+    st.markdown("---")
+    c1, c2 = st.columns([1, 1])
+    
+    with c1:
+        st.markdown("#### ⚡ Commodity/Metal Calls")
+        for metal in EXPERT_DATA["METALS"]:
+            trend_col = "#009933" if "BULLISH" in metal["trend"] else ("#cc0000" if "BEARISH" in metal["trend"] else "#ffcc00")
+            st.markdown(f"""
+            <div style="background:#fff; padding:15px; border-radius:8px; border-left: 5px solid {trend_col}; margin-bottom:10px; box-shadow:0 2px 4px #eee;">
+                <div style="font-weight:bold; font-size:16px;">{metal['commodity']} <span style="font-size:12px; color:{trend_col}">({metal['trend']})</span></div>
+                <div style="display:flex; gap:15px; margin-top:5px; font-size:14px;">
+                    <span>CMP: <b>{metal['current_market_price']}</b></span>
+                    <span>TGT: <b>{metal['target_1']}</b></span>
+                    <span>SL: <b>{metal['stop_loss']}</b></span>
+                </div>
+                <div style="font-size:12px; color:#666; margin-top:5px;">{metal['analysis']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+    with c2:
+        st.markdown("#### 📡 Index & Global Signals")
+        for signal in EXPERT_DATA["SCRIPT_SPECIFIC_SIGNALS"]:
+             st.info(f"**{signal['script']} ({signal['side']})**: {signal['confirmation_logic']} (Zone: {signal['action_zone']})")
+
+    # 3. Global Impact
+    st.markdown("#### 🌏 Macro News Impact")
+    for news in EXPERT_DATA["GLOBAL_NEWS_IMPACT"]:
+        emoji = "🟢" if news['sentiment'] == "BULLISH" else ("🔴" if news['sentiment'] == "BEARISH" else "⚪")
+        with st.expander(f"{emoji} {news['event']} (Impact: {news['impact_asset']})"):
+            st.write(f"**Reason:** {news['reason']}")
