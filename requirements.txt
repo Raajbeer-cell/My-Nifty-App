@@ -1,10 +1,7 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import pandas_ta as ta
-import numpy as np
-import feedparser
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
-import time
-from datetime import datetime
+streamlit
+yfinance
+pandas
+pandas-ta
+numpy
+feedparser
+nltk
