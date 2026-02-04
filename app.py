@@ -2,156 +2,142 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
-import io
-import datetime
+import numpy as np
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Quantum Sniper X", page_icon="⚡", layout="wide")
+# --- 1. SETUP & PAGE CONFIG ---
+st.set_page_config(page_title="Nifty Sniper Pro", page_icon="📈", layout="wide")
 
-if 'trades' not in st.session_state:
-    st.session_state.trades = []
+# Custom CSS for Dark Theme
+st.markdown("""
+<style>
+    .stApp { background-color: #0e1117; color: #e1e1e1; }
+    .metric-card {
+        background: #1f2937; padding: 20px; border-radius: 10px;
+        border: 1px solid #374151; margin-bottom: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .bullish { color: #10b981; font-weight: bold; }
+    .bearish { color: #ef4444; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
 
-# --- 2. ADVANCED ANALYSIS ENGINE ---
-def get_analysis(symbol):
+# --- 2. DATA ENGINE (BUG FIXED) ---
+@st.cache_data(ttl=60)
+def get_nifty_data(symbol):
     try:
-        # 1. Multi-Timeframe Logic (Trend Detection)
-        # Using 15m for calculation, representing intraday
-        df = yf.download(symbol, period="5d", interval="15m", progress=False)
-        if df.empty: return None
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        # FIX 1: Period increased to '1mo' for EMA 200 calculation
+        df = yf.download(symbol, period="1mo", interval="15m", progress=False)
         
+        if df.empty:
+            return None
+
+        # FIX 2: Handle MultiIndex Columns (Crucial Fix for yfinance update)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        # Ensure we have enough data
+        if len(df) < 200:
+            return None
+
         # Indicators
         df['EMA200'] = ta.ema(df['Close'], length=200)
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
         
+        # Support & Resistance (Pivot Logic)
+        last_h = df['High'].iloc[-20:].max()
+        last_l = df['Low'].iloc[-20:].min()
+        
         last = df.iloc[-1]
-        price = float(last['Close'])
-        atr = float(last['ATR'])
         
-        # 2. Dynamic TSL Calculation (ATR Based)
-        # Buy Side TSL = Price - (2 * ATR)
-        # Sell Side TSL = Price + (2 * ATR)
-        buy_sl = price - (atr * 2)
-        sell_sl = price + (atr * 2)
+        # Logic: OI/Volume Build Up (Simulated)
+        price_chg = (df['Close'].iloc[-1] - df['Close'].iloc[-2])
+        vol_chg = (df['Volume'].iloc[-1] - df['Volume'].iloc[-2])
         
-        # 3. Signal Generation
-        bias = "NEUTRAL ⚪"
+        buildup = "NEUTRAL"
+        if price_chg > 0 and vol_chg > 0: buildup = "LONG BUILDUP 🟢"
+        elif price_chg < 0 and vol_chg > 0: buildup = "SHORT BUILDUP 🔴"
+        elif price_chg > 0 and vol_chg < 0: buildup = "SHORT COVERING 🔵"
+        elif price_chg < 0 and vol_chg < 0: buildup = "LONG UNWINDING 🟠"
+        
+        # Target/SL Logic
+        action = "WAIT"
         color = "#888"
-        if price > last['EMA200'] and last['RSI'] > 55:
-            bias = "STRONG BUY 🚀"
-            color = "#00ffaa"
-        elif price < last['EMA200'] and last['RSI'] < 45:
-            bias = "STRONG SELL 🩸"
-            color = "#ff4b4b"
+        if last['Close'] > last['EMA200'] and last['RSI'] > 55:
+            action = "BUY / CALL"
+            color = "#10b981"
+        elif last['Close'] < last['EMA200'] and last['RSI'] < 45:
+            action = "SELL / PUT"
+            color = "#ef4444"
             
+        atr_val = last['ATR'] if not pd.isna(last['ATR']) else 0
+        
         return {
-            "price": price, "bias": bias, "color": color, 
-            "buy_sl": buy_sl, "sell_sl": sell_sl, "atr": atr,
-            "rsi": last['RSI']
+            "price": last['Close'],
+            "action": action,
+            "color": color,
+            "buildup": buildup,
+            "support": last_l,
+            "resist": last_h,
+            "sl": last['Close'] - (atr_val * 2) if "BUY" in action else last['Close'] + (atr_val * 2),
+            "target": last['Close'] + (atr_val * 3) if "BUY" in action else last['Close'] - (atr_val * 3)
         }
+        
     except Exception as e:
+        # FIX 3: Catch generic errors to prevent app crash
+        print(f"Error fetching {symbol}: {e}")
         return None
 
-# --- 3. UI DASHBOARD ---
-st.title("⚡ Quantum Sniper X (Auto-Risk Management)")
-st_autorefresh(interval=60000, key="auto_x")
+# --- 3. DASHBOARD UI ---
+st.title("🇮🇳 Nifty & BankNifty Sniper Pro")
+st_autorefresh(interval=30000, key="datarefresh") # Auto refresh every 30 secs
 
-indices = {"NIFTY 50": "^NSEI", "BANK NIFTY": "^NSEBANK"}
-cols = st.columns(2)
+col1, col2 = st.columns(2)
 
-for i, (name, sym) in enumerate(indices.items()):
-    data = get_analysis(sym)
-    if data:
-        with cols[i]:
+# List of Indices
+indices = {
+    "NIFTY 50": "^NSEI",
+    "BANK NIFTY": "^NSEBANK"
+}
+
+for i, (name, ticker) in enumerate(indices.items()):
+    data = get_nifty_data(ticker)
+    
+    # Choose column (Left or Right)
+    with (col1 if i % 2 == 0 else col2):
+        if data:
             st.markdown(f"""
-            <div style="background:#0d1117; padding:20px; border-radius:15px; border-left:8px solid {data['color']}; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+            <div class="metric-card" style="border-left: 5px solid {data['color']};">
                 <div style="display:flex; justify-content:space-between;">
-                    <h3 style="margin:0; color:#e1e1e1;">{name}</h3>
-                    <span style="background:{data['color']}22; color:{data['color']}; padding:2px 8px; border-radius:4px; font-size:0.8rem;">{data['bias']}</span>
+                    <h3>{name}</h3>
+                    <span style="background:#374151; padding:2px 8px; border-radius:5px; font-size:0.8rem;">{data['buildup']}</span>
                 </div>
-                <h1 style="margin:10px 0; font-size:3rem; font-weight:800;">{data['price']:,.2f}</h1>
+                <h1 style="margin:0; font-size:2.5rem;">{data['price']:,.2f}</h1>
+                <p style="color:{data['color']}; font-size:1.2rem; font-weight:bold;">Signal: {data['action']}</p>
                 
-                <div style="background:#161b22; padding:10px; border-radius:8px; display:flex; justify-content:space-between; margin-bottom:15px;">
-                    <div style="text-align:center;">
-                        <span style="color:#aaa; font-size:0.8rem;">VOLATILITY (ATR)</span><br>
-                        <span style="color:#fff; font-weight:bold;">{data['atr']:.1f} pts</span>
+                <hr style="border-color:#374151;">
+                
+                <div style="display:flex; justify-content:space-between; text-align:center;">
+                    <div>
+                        <small style="color:#9ca3af;">Support</small><br>
+                        <b>{data['support']:,.0f}</b>
                     </div>
-                    <div style="text-align:center;">
-                        <span style="color:#aaa; font-size:0.8rem;">RSI MOMENTUM</span><br>
-                        <span style="color:#fff; font-weight:bold;">{data['rsi']:.1f}</span>
+                    <div>
+                        <small style="color:#9ca3af;">Resistance</small><br>
+                        <b>{data['resist']:,.0f}</b>
                     </div>
                 </div>
                 
-                <div style="font-size:0.85rem; color:#888; font-style:italic;">
-                    System Suggested TSL: <b style="color:#00ffaa;">{data['buy_sl']:,.1f} (L)</b> | <b style="color:#ff4b4b;">{data['sell_sl']:,.1f} (S)</b>
+                <div style="margin-top:15px; background:#111827; padding:10px; border-radius:8px;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span class="bullish">🎯 TGT: {data['target']:,.0f}</span>
+                        <span class="bearish">🛑 SL: {data['sl']:,.0f}</span>
+                    </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
-            # TRADE EXECUTION BUTTONS
-            b1, b2 = st.columns(2)
-            if b1.button(f"🚀 BUY {name}", use_container_width=True):
-                st.session_state.trades.append({
-                    "Time": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "Asset": name, "Type": "BUY", 
-                    "Entry Price": data['price'], 
-                    "Auto TSL": round(data['buy_sl'], 2),  # Saving Calculated TSL
-                    "Risk (Pts)": round(data['price'] - data['buy_sl'], 2)
-                })
-                st.toast(f"Buy Order Punched! TSL set at {data['buy_sl']:.1f}", icon="✅")
-                
-            if b2.button(f"🩸 SELL {name}", use_container_width=True):
-                st.session_state.trades.append({
-                    "Time": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "Asset": name, "Type": "SELL", 
-                    "Entry Price": data['price'], 
-                    "Auto TSL": round(data['sell_sl'], 2), # Saving Calculated TSL
-                    "Risk (Pts)": round(data['sell_sl'] - data['price'], 2)
-                })
-                st.toast(f"Sell Order Punched! TSL set at {data['sell_sl']:.1f}", icon="✅")
+        else:
+            st.warning(f"⏳ Fetching data for {name}... (Wait or Check Internet)")
 
-# --- 4. EXCEL REPORTING ---
-st.divider()
-st.subheader("📊 Automated Trade Journal")
-
-if st.session_state.trades:
-    df = pd.DataFrame(st.session_state.trades)
-    
-    # Styling the dataframe for better readability
-    st.dataframe(
-        df.style.applymap(lambda v: 'color: #00ffaa;' if v == 'BUY' else ('color: #ff4b4b;' if v == 'SELL' else ''), subset=['Type'])
-          .format({"Entry Price": "{:,.2f}", "Auto TSL": "{:,.2f}", "Risk (Pts)": "{:.2f}"}),
-        use_container_width=True
-    )
-    
-    # EXCEL DOWNLOAD LOGIC
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sniper_Trades')
-        
-        # Auto-Formatting Excel Widths
-        workbook = writer.book
-        worksheet = writer.sheets['Sniper_Trades']
-        format1 = workbook.add_format({'num_format': '0.00'})
-        worksheet.set_column('D:F', 18, format1) # Formatting Price Columns
-        
-    st.download_button(
-        label="📥 Download Excel Report (with TSL)",
-        data=output.getvalue(),
-        file_name=f"Sniper_Journal_{datetime.date.today()}.xlsx",
-        mime="application/vnd.ms-excel"
-    )
-else:
-    st.info("Waiting for trade execution... Click BUY/SELL above.")
-
-# --- SIDEBAR: RISK METRICS ---
-st.sidebar.header("🛡️ Risk Management")
-st.sidebar.info("""
-**Auto TSL Formula:**
-- **Buy:** Current Price - (2 x ATR)
-- **Sell:** Current Price + (2 x ATR)
-
-ATR (Average True Range) volatility ko measure karta hai. Agar market tez move karega, TSL door ho jayega taaki SL hunt na ho.
-""")
+st.info("ℹ️ **Status:** System Active. Data updates automatically every 30 seconds.")
