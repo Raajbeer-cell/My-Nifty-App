@@ -176,7 +176,7 @@ EXPERT_DATA = {
   ],
   "SCRIPT_SPECIFIC_SIGNALS": [
     {
-      "script": "NIFTY 50",
+      "script_name": "NIFTY 50",
       "side": "BUY/LONG",
       "action_zone": "Above 25800",
       "confirmation_logic": "Hourly closing above 25800 indicates continuation of the trend towards 26000. Support established at 25650.",
@@ -190,65 +190,86 @@ EXPERT_DATA = {
       "risk_reward": "1:2"
     },
     {
-      "script_name": "RELIANCE",
+      "script_name": "BITCOIN",
       "side": "BUY/LONG",
-      "action_zone": "At CMP 1450-1460",
-      "confirmation_logic": "Stock has taken support at 200 DMA. RSI showing positive divergence.",
+      "action_zone": "Above $110,000",
+      "confirmation_logic": "Holding above key support. Altseason delayed—BTC dominance still high.",
       "risk_reward": "1:3"
+    },
+    {
+      "script_name": "CRUDE OIL",
+      "side": "SELL/SHORT",
+      "action_zone": "Below $72",
+      "confirmation_logic": "Bearish bias intact with oversupply concerns. Target $68.",
+      "risk_reward": "1:2"
     }
   ],
   "GLOBAL_NEWS_IMPACT": [
     {
-      "event": "India-US Trade Deal Announcement",
-      "impact_asset": "Nifty IT & Pharma",
+      "event": "India-US Trade Deal Finalized",
       "sentiment": "BULLISH",
-      "reason": "Reduction in tariffs to 18% improves competitiveness for export-oriented Indian sectors, boosting earnings visibility."
+      "impact_asset": "Indian Equities (Pharma, IT Services, Exports)",
+      "reason": "Reduces tariff barriers. Long-term positive."
     },
     {
-      "event": "US Fed Rate Decision (Upcoming)",
-      "impact_asset": "GOLD & BANK NIFTY",
-      "sentiment": "NEUTRAL",
-      "reason": "Markets have priced in a pause. Any hawkish commentary could trigger profit booking in Gold and Banking stocks."
+      "event": "Fed Hints at Rate Cuts in Q2 2026",
+      "sentiment": "BULLISH",
+      "impact_asset": "Gold, Silver, Global Equities",
+      "reason": "Lower rates = weaker USD = boost for commodities and risk-on assets."
     },
     {
-      "event": "Brent Crude Stabilizing at $70",
-      "impact_asset": "ASIAN PAINTS / TYRE STOCKS",
-      "sentiment": "BULLISH",
-      "reason": "Lower crude input costs directly improve margins for paint and tyre manufacturing companies."
+      "event": "China GDP Miss (Expected 5.2%, Actual 4.8%)",
+      "sentiment": "BEARISH",
+      "impact_asset": "Base Metals (Copper), Energy",
+      "reason": "Slowing demand from world's largest commodity consumer."
     }
   ]
 }
 
-# --- FUNCTIONS ---
-
-@st.cache_data(ttl=55) # Cache slightly less than refresh rate
+# --- FETCH DATA ---
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_data(tickers, period, interval):
-    tickers_str = " ".join(tickers)
-    data = yf.download(tickers_str, period=period, interval=interval, group_by='ticker', threads=True, progress=False)
-    return data
+    try:
+        data = yf.download(tickers, period=period, interval=interval, group_by='ticker', progress=False)
+        return data
+    except Exception as e:
+        st.error(f"Data fetch error: {e}")
+        return None
 
+# --- TECHNICAL SCORING ---
 def calculate_technical_score(df):
-    if df.empty or len(df) < 50: return 0, 0, 10, {}
+    df_ind = df.copy()
     
-    # Calculate Indicators
-    df['EMA_50'] = df.ta.ema(length=50)
-    df['EMA_200'] = df.ta.ema(length=200)
-    df['RSI'] = df.ta.rsi(length=14)
-    macd = df.ta.macd(fast=12, slow=26, signal=9)
-    df['MACD'] = macd['MACD_12_26_9']
-    df['MACD_SIGNAL'] = macd['MACDs_12_26_9']
-    adx = df.ta.adx(length=14)
-    df['ADX'] = adx[adx.columns[0]] if adx is not None else 0
+    # Calculate indicators
+    df_ind['EMA_9'] = ta.ema(df_ind['Close'], length=9)
+    df_ind['EMA_21'] = ta.ema(df_ind['Close'], length=21)
+    df_ind['RSI'] = ta.rsi(df_ind['Close'], length=14)
     
-    # Current values
-    curr = df.iloc[-1]
+    macd = ta.macd(df_ind['Close'])
+    if macd is not None and not macd.empty:
+        df_ind['MACD'] = macd['MACD_12_26_9']
+        df_ind['MACD_SIGNAL'] = macd['MACDs_12_26_9']
+    else:
+        df_ind['MACD'] = 0
+        df_ind['MACD_SIGNAL'] = 0
+    
+    adx_data = ta.adx(df_ind['High'], df_ind['Low'], df_ind['Close'], length=14)
+    if adx_data is not None and not adx_data.empty:
+        df_ind['ADX'] = adx_data['ADX_14']
+    else:
+        df_ind['ADX'] = 0
+    
+    df_ind = df_ind.dropna()
+    if df_ind.empty or len(df_ind) < 2:
+        return 5.0, 0, 10, {}
+    
+    curr = df_ind.iloc[-1]
     close = curr['Close']
     
-    # --- SCORING LOGIC ---
     checks = {
-        "Price > EMA 50": close > curr['EMA_50'],
-        "Price > EMA 200": close > curr['EMA_200'],
-        "RSI Bullish (>50)": curr['RSI'] > 50,
+        "Price > EMA 9": close > curr['EMA_9'],
+        "Price > EMA 21": close > curr['EMA_21'],
+        "EMA 9 > EMA 21": curr['EMA_9'] > curr['EMA_21'],
         "RSI Not Overbought (<70)": curr['RSI'] < 70,
         "MACD > Signal": curr['MACD'] > curr['MACD_SIGNAL'],
         "MACD > 0": curr['MACD'] > 0,
@@ -432,7 +453,7 @@ with tab3:
     with c2:
         st.markdown("#### 📡 Index & Global Signals")
         for signal in EXPERT_DATA["SCRIPT_SPECIFIC_SIGNALS"]:
-             st.info(f"**{signal['script']} ({signal['side']})**: {signal['confirmation_logic']} (Zone: {signal['action_zone']})")
+             st.info(f"**{signal['script_name']} ({signal['side']})**: {signal['confirmation_logic']} (Zone: {signal['action_zone']})")
 
     # 3. Global Impact
     st.markdown("#### 🌏 Macro News Impact")
