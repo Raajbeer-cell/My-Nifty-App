@@ -245,8 +245,7 @@ def fetch_market_data(tickers, period, interval):
             interval=interval, 
             group_by='ticker', 
             threads=True, 
-            progress=False,
-            show_errors=False
+            progress=False
         )
         return data
     except Exception as e:
