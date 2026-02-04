@@ -10,6 +10,308 @@ import time
 from datetime import datetime
 
 
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import pandas_ta as ta
+import numpy as np
+import feedparser
+import nltk
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from datetime import datetime
+
+# --- SETUP & CONFIGURATION ---
+st.set_page_config(page_title="ProTrader AI Terminal", page_icon="⚡", layout="wide")
+
+# NLTK Download (Quietly)
+try:
+    nltk.data.find('sentiment/vader_lexicon.zip')
+except LookupError:
+    nltk.download('vader_lexicon', quiet=True)
+
+sia = SentimentIntensityAnalyzer()
+
+# --- PREMIUM STYLING (CSS) ---
+st.markdown("""
+<style>
+    .stApp { background-color: #050505; color: #e0e0e0; font-family: 'Roboto', sans-serif; }
+    
+    /* Silver Card Special */
+    .silver-card {
+        background: linear-gradient(135deg, #2c3e50, #000000);
+        border: 2px solid #C0C0C0; /* Silver Border */
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 0 20px rgba(192, 192, 192, 0.2);
+        margin-bottom: 20px;
+    }
+    
+    .metric-card {
+        background: linear-gradient(145deg, #1a1a1a, #0d0d0d);
+        border: 1px solid #333;
+        padding: 15px;
+        border-radius: 12px;
+        margin-bottom: 15px;
+    }
+    
+    .badge-long { background-color: rgba(0, 255, 0, 0.1); color: #00ff00; border: 1px solid #00ff00; padding: 4px 10px; border-radius: 8px; font-weight: bold; }
+    .badge-short { background-color: rgba(255, 0, 0, 0.1); color: #ff4444; border: 1px solid #ff4444; padding: 4px 10px; border-radius: 8px; font-weight: bold; }
+    .badge-wait { background-color: #222; color: #888; padding: 4px 10px; border-radius: 8px; border: 1px solid #444; }
+    
+    .block-zone { color: #f39c12; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- SIDEBAR CONTROL ---
+with st.sidebar:
+    st.title("⚡ Control Center")
+    auto_refresh = st.checkbox("🔄 Enable 15s Auto-Refresh", value=False)
+    if auto_refresh:
+        st.markdown(f'<meta http-equiv="refresh" content="15">', unsafe_allow_html=True)
+        st.markdown(f"<small style='color:#00ff00'>Live: {datetime.now().strftime('%H:%M:%S')}</small>", unsafe_allow_html=True)
+    else:
+        if st.button("Manual Refresh"): st.rerun()
+    
+    st.info("💡 **Silver Tip:** Silver follows global market (SI=F). Always trade with Order Blocks.")
+
+# --- DATA CONFIGURATION ---
+ASSETS = {
+    "🇮🇳 INDICES": {"NIFTY 50": "^NSEI", "BANK NIFTY": "^NSEBANK"},
+    "🇺🇸 US TECH": {"TESLA": "TSLA", "NVIDIA": "NVDA", "APPLE": "AAPL"},
+    "🪙 CRYPTO": {"BITCOIN": "BTC-USD", "SOLANA": "SOL-USD"},
+    "⛏️ COMMODITIES": {"GOLD": "GC=F", "CRUDE OIL": "CL=F", "NATURAL GAS": "NG=F"}
+}
+# Silver Special Ticker
+SILVER_TICKER = "SI=F" 
+
+ALL_TICKERS = list([v for cat in ASSETS.values() for v in cat.values()])
+ALL_TICKERS.append(SILVER_TICKER)
+
+# --- ANALYSIS ENGINE ---
+
+@st.cache_data(ttl=15)
+def fetch_data(tickers, period, interval):
+    tickers_str = " ".join(tickers)
+    data = yf.download(tickers_str, period=period, interval=interval, group_by='ticker', threads=True, progress=False)
+    return data
+
+def analyze_silver_vip(df):
+    if df.empty or len(df) < 50: return None
+    
+    # --- 1. Indicators Calculation (Max Indicators) ---
+    df['EMA_20'] = df.ta.ema(length=20)
+    df['EMA_50'] = df.ta.ema(length=50)
+    df['EMA_200'] = df.ta.ema(length=200)
+    df['RSI'] = df.ta.rsi(length=14)
+    df['ATR'] = df.ta.atr(length=14)
+    
+    # MACD
+    macd = df.ta.macd(fast=12, slow=26, signal=9)
+    df['MACD'] = macd['MACD_12_26_9']
+    df['MACD_SIG'] = macd['MACDs_12_26_9']
+    
+    # Bollinger Bands
+    bb = df.ta.bbands(length=20, std=2)
+    df['BB_UP'] = bb['BBU_20_2.0']
+    df['BB_LOW'] = bb['BBL_20_2.0']
+    
+    # Supertrend
+    st_data = df.ta.supertrend(length=10, multiplier=3)
+    st_dir_col = [c for c in st_data.columns if "SUPERTd_" in c][0]
+    df['Trend'] = st_data[st_dir_col] # 1 = Up, -1 = Down
+
+    # --- 2. Order Blocks (Support/Resistance) ---
+    # Logic: Last 20 candles Low min and High max
+    order_block_supp = df['Low'].tail(20).min()
+    order_block_res = df['High'].tail(20).max()
+    
+    curr = df.iloc[-1]
+    close = curr['Close']
+    
+    # --- 3. Decision Logic (Score System) ---
+    score = 0
+    total_checks = 5
+    reasons = []
+    
+    # Check 1: Supertrend
+    if curr['Trend'] == 1: score += 1; reasons.append("Supertrend Bullish")
+    else: score -= 1; reasons.append("Supertrend Bearish")
+    
+    # Check 2: EMA Structure
+    if close > curr['EMA_50']: score += 1
+    else: score -= 1
+    
+    # Check 3: RSI
+    if curr['RSI'] > 55: score += 1; reasons.append("RSI Strong")
+    elif curr['RSI'] < 45: score -= 1; reasons.append("RSI Weak")
+    
+    # Check 4: MACD
+    if curr['MACD'] > curr['MACD_SIG']: score += 1
+    else: score -= 1
+    
+    # Check 5: Price vs EMA 20 (Momentum)
+    if close > curr['EMA_20']: score += 1
+    else: score -= 1
+
+    # --- 4. Signal Generation ---
+    signal = "NEUTRAL / CHOPPY"
+    color = "badge-wait"
+    action_text = "Wait for clear direction"
+    
+    if score >= 3:
+        signal = "STRONG BUY / LONG 🚀"
+        color = "badge-long"
+        action_text = f"Buy Above {curr['High']:.2f}"
+        sl = order_block_supp
+        tgt1 = close + (curr['ATR'] * 2)
+        tgt2 = close + (curr['ATR'] * 4)
+    elif score <= -3:
+        signal = "STRONG SELL / SHORT 🩸"
+        color = "badge-short"
+        action_text = f"Sell Below {curr['Low']:.2f}"
+        sl = order_block_res
+        tgt1 = close - (curr['ATR'] * 2)
+        tgt2 = close - (curr['ATR'] * 4)
+    else:
+        sl = 0; tgt1 = 0; tgt2 = 0
+
+    return {
+        "signal": signal, "color": color, "price": close, "score": score,
+        "sl": sl, "tgt1": tgt1, "tgt2": tgt2,
+        "supp": order_block_supp, "res": order_block_res,
+        "rsi": curr['RSI'], "reasons": reasons
+    }
+
+def analyze_market_general(df):
+    # Simplified logic for other assets
+    if df.empty or len(df) < 50: return None
+    df['EMA_50'] = df.ta.ema(length=50)
+    df['RSI'] = df.ta.rsi(length=14)
+    st_data = df.ta.supertrend(length=10, multiplier=3)
+    df['Trend'] = st_data[st_data.columns[1]]
+    
+    close = df['Close'].iloc[-1]
+    trend = df['Trend'].iloc[-1]
+    rsi = df['RSI'].iloc[-1]
+    
+    sig = "WAIT"; col = "badge-wait"
+    if trend == 1 and rsi > 50: sig = "BUY"; col = "badge-long"
+    elif trend == -1 and rsi < 50: sig = "SELL"; col = "badge-short"
+    
+    return {"signal": sig, "badge": col, "price": close}
+
+# --- UI LAYOUT ---
+st.title("⚡ ProTrader AI Terminal")
+
+# Tabs
+tab_silver, tab_scan, tab_mom = st.tabs(["💎 SILVER VIP (MCX)", "📊 GLOBAL SCANNER", "🔥 JACKPOT"])
+
+# Get Data
+raw_data = fetch_data(ALL_TICKERS, period="5d", interval="15m")
+
+# === TAB 1: SILVER VIP ===
+with tab_silver:
+    st.markdown("### 💎 SILVER AUTOMATED AI TRADER")
+    
+    try:
+        # Silver Logic
+        if len(ALL_TICKERS) > 1: s_df = raw_data[SILVER_TICKER].dropna()
+        else: s_df = raw_data.dropna()
+        
+        s_res = analyze_silver_vip(s_df)
+        
+        if s_res:
+            # Main Signal Card
+            st.markdown(f"""
+            <div class="silver-card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h2 style="color:#C0C0C0; margin:0;">SILVER (Global/MCX)</h2>
+                    <span class="{s_res['color']}" style="font-size:18px;">{s_res['signal']}</span>
+                </div>
+                <h1 style="color:white; margin:10px 0;">${s_res['price']:.3f}</h1>
+                <p style="color:#aaa;">Confidence Score: {abs(s_res['score'])}/5</p>
+                <hr style="border-color:#555;">
+                
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                    <div>
+                        <h4 style="color:#00ff00; margin:0;">🎯 Targets (Profit Book)</h4>
+                        <ul style="list-style:none; padding:0; color:#ddd;">
+                            <li>Target 1: <b>{s_res['tgt1']:.3f}</b></li>
+                            <li>Target 2: <b>{s_res['tgt2']:.3f}</b></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 style="color:#ff4444; margin:0;">🛑 Stop Loss</h4>
+                        <div style="font-size:18px; font-weight:bold;">{s_res['sl']:.3f}</div>
+                    </div>
+                </div>
+                
+                <hr style="border-color:#555;">
+                <h4 class="block-zone">🧱 ORDER BLOCKS (Institutional Zones)</h4>
+                <div style="display:flex; justify-content:space-between; color:#ddd;">
+                    <span>Resistance (Sellers): <b style="color:#ff4444">{s_res['res']:.3f}</b></span>
+                    <span>Support (Buyers): <b style="color:#00ff00">{s_res['supp']:.3f}</b></span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Technical Details
+            with st.expander("🔍 View Technical Reason (Why AI took this trade?)", expanded=True):
+                st.write(f"**RSI Value:** {s_res['rsi']:.1f}")
+                st.write("**Confluence Factors:**")
+                for reason in s_res['reasons']:
+                    st.write(f"- {reason}")
+                    
+    except Exception as e:
+        st.error(f"Waiting for Silver Data... (Error: {str(e)})")
+
+# === TAB 2: GENERAL SCANNER ===
+with tab_scan:
+    st.subheader("📡 Global Market Overview")
+    for cat_name, tickers in ASSETS.items():
+        st.markdown(f"**{cat_name}**")
+        cols = st.columns(3)
+        idx = 0
+        for name, symbol in tickers.items():
+            try:
+                if len(ALL_TICKERS) > 1: df = raw_data[symbol].dropna()
+                else: df = raw_data.dropna()
+                res = analyze_market_general(df)
+                if res:
+                    with cols[idx % 3]:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <b>{name}</b> <span class="{res['badge']}">{res['signal']}</span><br>
+                            <span style="font-size:20px;">{res['price']:.2f}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    idx += 1
+            except: continue
+
+# === TAB 3: JACKPOT MOVERS ===
+with tab_mom:
+    st.info("Searching for One-Sided Momentum (ADX > 25)...")
+    # Reuse General Logic to find ADX spikes
+    m_cols = st.columns(3)
+    m_idx = 0
+    for symbol in ALL_TICKERS:
+        try:
+            if len(ALL_TICKERS) > 1: df = raw_data[symbol].dropna()
+            else: df = raw_data.dropna()
+            
+            adx = df.ta.adx(length=14)['ADX_14'].iloc[-1]
+            if adx > 25:
+                trend = "UP 🔥" if df['Close'].iloc[-1] > df.ta.ema(length=50).iloc[-1] else "DOWN ❄️"
+                with m_cols[m_idx % 3]:
+                    st.markdown(f"""
+                    <div class="metric-card" style="border:1px solid #ff00cc;">
+                        <b>{symbol}</b><br>
+                        Trend: {trend}<br>
+                        ADX Strength: {adx:.1f}
+                    </div>
+                    """, unsafe_allow_html=True)
+                m_idx += 1
+        except: continue
 
 
 import streamlit as st
