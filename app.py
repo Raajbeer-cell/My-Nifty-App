@@ -2,194 +2,156 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
-import numpy as np
-import feedparser
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import io
+import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. SETUP & THEME ---
-st.set_page_config(page_title="Nifty Sniper Pro", page_icon="📈", layout="wide")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Quantum Sniper X", page_icon="⚡", layout="wide")
 
-@st.cache_resource
-def load_nlp():
+if 'trades' not in st.session_state:
+    st.session_state.trades = []
+
+# --- 2. ADVANCED ANALYSIS ENGINE ---
+def get_analysis(symbol):
     try:
-        nltk.download('vader_lexicon')
-        return SentimentIntensityAnalyzer()
-    except: return None
-
-sia = load_nlp()
-
-# Custom CSS for Institutional Look
-st.markdown("""
-<style>
-    .stApp { background-color: #05070a; color: #e1e1e1; }
-    .metric-card {
-        background: linear-gradient(145deg, #111827, #030712);
-        padding: 20px; border-radius: 12px; border: 1px solid #1f2937;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .buy-signal { color: #10b981; font-weight: bold; font-size: 1.2rem; }
-    .sell-signal { color: #ef4444; font-weight: bold; font-size: 1.2rem; }
-    .build-up-tag { background: #1e3a8a; color: #60a5fa; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
-    .impact-high { border-left: 5px solid #ef4444; padding-left: 10px; }
-</style>
-""", unsafe_allow_html=True)
-
-# --- 2. DATA ENGINE (INDIAN MARKET FOCUS) ---
-
-def analyze_derivative_build_up(df):
-    """Calculates Build-up based on Price and Volume interaction"""
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    price_chg = (last['Close'] - prev['Close']) / prev['Close']
-    vol_chg = (last['Volume'] - prev['Volume']) / prev['Volume']
-    
-    if price_chg > 0 and vol_chg > 0.1: return "LONG BUILD-UP 🟢"
-    if price_chg < 0 and vol_chg > 0.1: return "SHORT BUILD-UP 🔴"
-    if price_chg > 0 and vol_chg < -0.1: return "SHORT COVERING 🔵"
-    if price_chg < 0 and vol_chg < -0.1: return "LONG UNWINDING 🟠"
-    return "NEUTRAL ⚪"
-
-@st.cache_data(ttl=60)
-def get_nifty_data(symbol):
-    df = yf.download(symbol, period="5d", interval="15m", progress=False)
-    if df.empty: return None
-    
-    # Advanced Indicators
-    df['EMA200'] = ta.ema(df['Close'], length=200)
-    df['VWAP'] = ta.vwap(df['High'], df['Low'], df['Close'], df['Volume'])
-    df['RSI'] = ta.rsi(df['Close'], length=14)
-    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-    
-    last = df.iloc[-1]
-    buildup = analyze_derivative_build_up(df)
-    
-    # Target & Stoploss Logic
-    action = "SCANNING"
-    if last['Close'] > last['EMA200'] and last['RSI'] > 55:
-        action = "STRONG BUY"
-    elif last['Close'] < last['EMA200'] and last['RSI'] < 45:
-        action = "STRONG SELL"
+        # 1. Multi-Timeframe Logic (Trend Detection)
+        # Using 15m for calculation, representing intraday
+        df = yf.download(symbol, period="5d", interval="15m", progress=False)
+        if df.empty: return None
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         
-    return {
-        "price": last['Close'], "buildup": buildup, "action": action,
-        "rsi": last['RSI'], "vwap": last['VWAP'],
-        "sl": last['Close'] - (last['ATR']*2) if "BUY" in action else last['Close'] + (last['ATR']*2),
-        "tp": last['Close'] + (last['ATR']*4) if "BUY" in action else last['Close'] - (last['ATR']*4),
-        "vol_breakout": last['Volume'] > df['Volume'].mean() * 1.5
-    }
-
-# --- 3. NEWS & SENTIMENT ENGINE ---
-def get_news_impact():
-    feed = feedparser.parse("https://www.moneycontrol.com/rss/economy.xml")
-    impact_list = []
-    for entry in feed.entries[:5]:
-        text = entry.title.lower()
-        impact = "Neutral"
-        affected = "General Market"
+        # Indicators
+        df['EMA200'] = ta.ema(df['Close'], length=200)
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
         
-        if "bank" in text or "rbi" in text or "hdfc" in text:
-            affected = "BANK NIFTY"; impact = "High"
-        elif "nifty" in text or "tax" in text or "gdp" in text:
-            affected = "NIFTY 50"; impact = "Moderate"
+        last = df.iloc[-1]
+        price = float(last['Close'])
+        atr = float(last['ATR'])
+        
+        # 2. Dynamic TSL Calculation (ATR Based)
+        # Buy Side TSL = Price - (2 * ATR)
+        # Sell Side TSL = Price + (2 * ATR)
+        buy_sl = price - (atr * 2)
+        sell_sl = price + (atr * 2)
+        
+        # 3. Signal Generation
+        bias = "NEUTRAL ⚪"
+        color = "#888"
+        if price > last['EMA200'] and last['RSI'] > 55:
+            bias = "STRONG BUY 🚀"
+            color = "#00ffaa"
+        elif price < last['EMA200'] and last['RSI'] < 45:
+            bias = "STRONG SELL 🩸"
+            color = "#ff4b4b"
             
-        sent = sia.polarity_scores(entry.title)['compound'] if sia else 0
-        impact_list.append({"title": entry.title, "affected": affected, "sentiment": sent, "impact": impact})
-    return impact_list
+        return {
+            "price": price, "bias": bias, "color": color, 
+            "buy_sl": buy_sl, "sell_sl": sell_sl, "atr": atr,
+            "rsi": last['RSI']
+        }
+    except Exception as e:
+        return None
 
-# --- 4. UI LAYOUT ---
-st.title("📈 NIFTY & BANK NIFTY COMMAND CENTER")
-st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["Live Dashboard", "News Impact AI", "Astro & Wealth Picks"])
+# --- 3. UI DASHBOARD ---
+st.title("⚡ Quantum Sniper X (Auto-Risk Management)")
+st_autorefresh(interval=60000, key="auto_x")
 
-# Auto Refresh
-st_autorefresh(interval=60000, key="niftyrefresh")
+indices = {"NIFTY 50": "^NSEI", "BANK NIFTY": "^NSEBANK"}
+cols = st.columns(2)
 
-if page == "Live Dashboard":
-    # --- ROW 1: NIFTY & BANKNIFTY ---
-    st.subheader("🇮🇳 Major Indian Indices")
-    indices = {"NIFTY 50": "^NSEI", "BANK NIFTY": "^NSEBANK"}
-    idx_cols = st.columns(2)
-    
-    for i, (name, sym) in enumerate(indices.items()):
-        data = get_nifty_data(sym)
-        if data:
-            with idx_cols[i]:
-                color = "#10b981" if "BUY" in data['action'] else "#ef4444"
-                st.markdown(f"""
-                <div class="metric-card" style="border-top: 4px solid {color};">
-                    <div style="display:flex; justify-content:space-between;">
-                        <span style="font-size:1.2rem; font-weight:bold;">{name}</span>
-                        <span class="build-up-tag">{data['buildup']}</span>
+for i, (name, sym) in enumerate(indices.items()):
+    data = get_analysis(sym)
+    if data:
+        with cols[i]:
+            st.markdown(f"""
+            <div style="background:#0d1117; padding:20px; border-radius:15px; border-left:8px solid {data['color']}; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                <div style="display:flex; justify-content:space-between;">
+                    <h3 style="margin:0; color:#e1e1e1;">{name}</h3>
+                    <span style="background:{data['color']}22; color:{data['color']}; padding:2px 8px; border-radius:4px; font-size:0.8rem;">{data['bias']}</span>
+                </div>
+                <h1 style="margin:10px 0; font-size:3rem; font-weight:800;">{data['price']:,.2f}</h1>
+                
+                <div style="background:#161b22; padding:10px; border-radius:8px; display:flex; justify-content:space-between; margin-bottom:15px;">
+                    <div style="text-align:center;">
+                        <span style="color:#aaa; font-size:0.8rem;">VOLATILITY (ATR)</span><br>
+                        <span style="color:#fff; font-weight:bold;">{data['atr']:.1f} pts</span>
                     </div>
-                    <div style="font-size:2.5rem; font-weight:800; margin:15px 0;">{data['price']:,.2f}</div>
-                    <div style="color:{color}; font-weight:bold;">SIGNAL: {data['action']}</div>
-                    <hr style="opacity:0.1;">
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                        <div>🎯 Target: <br><b style="color:#10b981;">{data['tp']:,.1f}</b></div>
-                        <div>🛑 Stoploss: <br><b style="color:#ef4444;">{data['sl']:,.1f}</b></div>
-                    </div>
-                    <div style="margin-top:15px; font-size:0.85rem; color:#9ca3af;">
-                        <b>Reason:</b> {'Volume Breakout' if data['vol_breakout'] else 'Regular Volume'} | RSI: {data['rsi']:.1f}
+                    <div style="text-align:center;">
+                        <span style="color:#aaa; font-size:0.8rem;">RSI MOMENTUM</span><br>
+                        <span style="color:#fff; font-weight:bold;">{data['rsi']:.1f}</span>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
-
-    # --- ROW 2: COMMODITIES & FOREX ---
-    st.markdown("---")
-    st.subheader("⚒️ Commodities & Forex (Global Impact)")
-    comm_cols = st.columns(3)
-    comms = {"SILVER (MCX)": "SI=F", "GOLD": "GC=F", "USD/INR": "USDINR=X"}
-    for i, (name, sym) in enumerate(comms.items()):
-        res = get_nifty_data(sym)
-        if res:
-            with comm_cols[i]:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div style="color:#9ca3af; font-size:0.9rem;">{name}</div>
-                    <div style="font-size:1.5rem; font-weight:bold;">{res['price']:,.2f}</div>
-                    <div style="font-size:0.8rem; color:{res['color']};">{res['action']}</div>
+                
+                <div style="font-size:0.85rem; color:#888; font-style:italic;">
+                    System Suggested TSL: <b style="color:#00ffaa;">{data['buy_sl']:,.1f} (L)</b> | <b style="color:#ff4b4b;">{data['sell_sl']:,.1f} (S)</b>
                 </div>
-                """, unsafe_allow_html=True)
-
-elif page == "News Impact AI":
-    st.subheader("🧠 News Reasoning & Market Impact")
-    news_data = get_news_impact()
-    for n in news_data:
-        impact_color = "#ef4444" if n['impact'] == "High" else "#3b82f6"
-        st.markdown(f"""
-        <div class="metric-card impact-high" style="border-left-color:{impact_color}; margin-bottom:15px;">
-            <div style="font-weight:bold; font-size:1.1rem; color:#60a5fa;">{n['title']}</div>
-            <div style="margin-top:8px;">
-                🎯 <b>Affected:</b> {n['affected']} | 💥 <b>Impact:</b> {n['impact']}
             </div>
-            <div style="font-size:0.9rem; color:#9ca3af; margin-top:5px;">
-                <b>AI Analysis:</b> News sentiment is {n['sentiment']:.2f}. This news creates 
-                {'Panic/Selling' if n['sentiment'] < 0 else 'Optimism/Buying'} specifically in {n['affected']} stocks.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+            
+            # TRADE EXECUTION BUTTONS
+            b1, b2 = st.columns(2)
+            if b1.button(f"🚀 BUY {name}", use_container_width=True):
+                st.session_state.trades.append({
+                    "Time": datetime.datetime.now().strftime("%H:%M:%S"),
+                    "Asset": name, "Type": "BUY", 
+                    "Entry Price": data['price'], 
+                    "Auto TSL": round(data['buy_sl'], 2),  # Saving Calculated TSL
+                    "Risk (Pts)": round(data['price'] - data['buy_sl'], 2)
+                })
+                st.toast(f"Buy Order Punched! TSL set at {data['buy_sl']:.1f}", icon="✅")
+                
+            if b2.button(f"🩸 SELL {name}", use_container_width=True):
+                st.session_state.trades.append({
+                    "Time": datetime.datetime.now().strftime("%H:%M:%S"),
+                    "Asset": name, "Type": "SELL", 
+                    "Entry Price": data['price'], 
+                    "Auto TSL": round(data['sell_sl'], 2), # Saving Calculated TSL
+                    "Risk (Pts)": round(data['sell_sl'] - data['price'], 2)
+                })
+                st.toast(f"Sell Order Punched! TSL set at {data['sell_sl']:.1f}", icon="✅")
 
-elif page == "Astro & Wealth Picks":
-    st.header("✨ Astro-Wealth Strategic Picks")
-    st.info("Technical + Astro Cycle analysis for long-term holding.")
+# --- 4. EXCEL REPORTING ---
+st.divider()
+st.subheader("📊 Automated Trade Journal")
+
+if st.session_state.trades:
+    df = pd.DataFrame(st.session_state.trades)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>🇮🇳 HDFC BANK</h3>
-            <p style="color:#10b981;"><b>REASON:</b> Time cycle breakout. Saturn-Jupiter alignment favors heavyweights.</p>
-            <p><b>Entry:</b> 1620-1650 | <b>Target:</b> 1850 | <b>SL:</b> 1580</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>🪙 SILVER (Long Term)</h3>
-            <p style="color:#10b981;"><b>REASON:</b> Industrial demand + Moon cycle volatility.</p>
-            <p><b>MCX Target:</b> 1,05,000 | <b>Holding:</b> 6 Months</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Styling the dataframe for better readability
+    st.dataframe(
+        df.style.applymap(lambda v: 'color: #00ffaa;' if v == 'BUY' else ('color: #ff4b4b;' if v == 'SELL' else ''), subset=['Type'])
+          .format({"Entry Price": "{:,.2f}", "Auto TSL": "{:,.2f}", "Risk (Pts)": "{:.2f}"}),
+        use_container_width=True
+    )
+    
+    # EXCEL DOWNLOAD LOGIC
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sniper_Trades')
+        
+        # Auto-Formatting Excel Widths
+        workbook = writer.book
+        worksheet = writer.sheets['Sniper_Trades']
+        format1 = workbook.add_format({'num_format': '0.00'})
+        worksheet.set_column('D:F', 18, format1) # Formatting Price Columns
+        
+    st.download_button(
+        label="📥 Download Excel Report (with TSL)",
+        data=output.getvalue(),
+        file_name=f"Sniper_Journal_{datetime.date.today()}.xlsx",
+        mime="application/vnd.ms-excel"
+    )
+else:
+    st.info("Waiting for trade execution... Click BUY/SELL above.")
+
+# --- SIDEBAR: RISK METRICS ---
+st.sidebar.header("🛡️ Risk Management")
+st.sidebar.info("""
+**Auto TSL Formula:**
+- **Buy:** Current Price - (2 x ATR)
+- **Sell:** Current Price + (2 x ATR)
+
+ATR (Average True Range) volatility ko measure karta hai. Agar market tez move karega, TSL door ho jayega taaki SL hunt na ho.
+""")
