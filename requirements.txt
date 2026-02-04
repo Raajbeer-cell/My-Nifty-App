@@ -1,8 +1,9 @@
 streamlit
 yfinance
 pandas
-pandas_ta
+pandas-ta
 numpy
 feedparser
 nltk
 streamlit-autorefresh
+plotly
