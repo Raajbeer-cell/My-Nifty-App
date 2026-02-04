@@ -6,16 +6,7 @@ import numpy as np
 import feedparser
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-import time
-from datetime import datetime
 
-
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import pandas_ta as ta
-import numpy as np
-from datetime import datetime
 
 # --- SETUP ---
 st.set_page_config(page_title="ProTrader Silver Terminal", page_icon="💎", layout="wide")
@@ -166,17 +157,6 @@ else:
 
 st.write("---")
 st.caption("Note: Ye data global Silver Futures ka hai jo MCX ko lead karta hai.")
-
-
-
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import pandas_ta as ta
-import numpy as np
-import feedparser
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 # --- SETUP (Ye bas ek baar chalta hai) ---
 # NLTK Vader Lexicon download (Sentiment samajhne ke liye)
