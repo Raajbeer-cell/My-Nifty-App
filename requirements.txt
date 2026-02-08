@@ -5,3 +5,4 @@ pandas-ta
 numpy
 feedparser
 nltk
+streamlit_autorefresh
