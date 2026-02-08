@@ -1,8 +1,9 @@
 streamlit
-yfinance
+yfinance==0.2.28
 pandas
 pandas-ta
 numpy
 feedparser
 nltk
+plotly
 streamlit_autorefresh
